@@ -80,6 +80,10 @@ def find_sb_alg(graph, s, direction, only_simple=False, only_super=False):
                 seen.add((u[0], 1))
             else:
                 seen.add((u[0], 0))
+
+            if u[0] in visited:
+                continue
+            
             # if all u_parents are visited then we push it into S
             if all(graph.nodes[i].id in visited for i in u_parents):
                 S.add((graph.nodes[u[0]], u_child_direction))

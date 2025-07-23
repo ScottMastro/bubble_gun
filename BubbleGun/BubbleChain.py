@@ -106,68 +106,43 @@ class BubbleChain:
     def sort(self):
         """
         sorts the bubbles in the chain
+
+        Note: This function is an improvement on the last one and done by ScottMastro in Issue 8
         """
-        # finding ends
-        all_ends = dict()
+    
+        # Step 1: Build a mapping from each node ID to its connected bubbles
+        node_to_bubbles = dict()
         for b in self.bubbles:
-            source = str(b.source.id)
-            sink = str(b.sink.id)
-            if source > sink:
-                all_ends[(source, sink)] = b
-            else:
-                all_ends[(sink, source)] = b
+            for node_id in [str(b.source.id), str(b.sink.id)]:
+                if node_id not in node_to_bubbles:
+                    node_to_bubbles[node_id] = []
+                node_to_bubbles[node_id].append(b)
 
-        start = self.ends[0]  # randomly choosing one end of the chain as start
-        all_keys = list(all_ends.keys())
-        while len(self.sorted) < len(self.bubbles):
-            for idx, key in enumerate(all_keys):
-                if start in key:
-                    rm_key = idx
-                    start = key[1 - key.index(start)]
-                    self.sorted.append(all_ends[key])
+        # Step 2: Start at one end of the chain
+        current_node = self.ends[0]
+        visited_bubbles = set()
+
+        # Step 3: Traverse the chain using bubble adjacency
+        while True:
+            candidates = node_to_bubbles.get(current_node, [])
+            next_bubble = None
+
+            for b in candidates:
+                if b not in visited_bubbles:
+                    next_bubble = b
                     break
-            del all_keys[rm_key]
 
-    # def sort(self):
-    #     """
-    #     sorts the bubbles in the chain
-    #
-    #     Note: This function is an improvement on the last one and done by ScottMastro in Issue #8
-    #     """
-    #
-    #     # Step 1: Build a mapping from each node ID to its connected bubbles
-    #     node_to_bubbles = dict()
-    #     for b in self.bubbles:
-    #         for node_id in [str(b.source.id), str(b.sink.id)]:
-    #             if node_id not in node_to_bubbles:
-    #                 node_to_bubbles[node_id] = []
-    #             node_to_bubbles[node_id].append(b)
-    #
-    #     # Step 2: Start at one end of the chain
-    #     current_node = self.ends[0]
-    #     visited_bubbles = set()
-    #
-    #     # Step 3: Traverse the chain using bubble adjacency
-    #     while True:
-    #         candidates = node_to_bubbles.get(current_node, [])
-    #         next_bubble = None
-    #
-    #         for b in candidates:
-    #             if b not in visited_bubbles:
-    #                 next_bubble = b
-    #                 break
-    #
-    #         if next_bubble is None:  # shouldn't happen in a valid chain
-    #             logging.error("No unvisited bubble found: break in bubble chain. Stopping traversal.")
-    #             sys.exit(1)
-    #
-    #         self.sorted.append(next_bubble)
-    #         visited_bubbles.add(next_bubble)
-    #
-    #         # Step 4: Move to the next node
-    #         if str(next_bubble.source.id) == current_node:
-    #             current_node = str(next_bubble.sink.id)
-    #         else:
-    #             current_node = str(next_bubble.source.id)
-    #         if len(self.sorted) == len(self.bubbles):
-    #             break
+            if next_bubble is None:   #shouldn't happen in a valid chain
+                logging.error("No unvisited bubble found: break in bubble chain. Stopping traversal.")
+                sys.exit(1)
+
+            self.sorted.append(next_bubble)
+            visited_bubbles.add(next_bubble)
+
+            # Step 4: Move to the next node
+            if str(next_bubble.source.id) == current_node:
+                current_node = str(next_bubble.sink.id)
+            else:
+                current_node = str(next_bubble.source.id)
+            if len(self.sorted) == len(self.bubbles):
+                break
