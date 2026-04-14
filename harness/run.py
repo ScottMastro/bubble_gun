@@ -7,7 +7,10 @@ Example:
         --record-stats
 """
 import argparse
+import gzip
 import os
+import shutil
+import tempfile
 
 from BubbleGun.Graph import Graph
 import BubbleGun.find_bubbles as find_bubbles_mod
@@ -18,12 +21,31 @@ from harness import snapshot as snapshot_mod
 from harness import stats as stats_mod
 
 
+def _resolve_gfa(path):
+    """Decompress .gz to an alongside cache file (only if missing/stale)."""
+    if not path.endswith(".gz"):
+        return path, None
+    cache = path[:-3]  # drop .gz
+    if os.path.exists(cache) and os.path.getmtime(cache) >= os.path.getmtime(path):
+        return cache, None
+    tmp_fd, tmp_path = tempfile.mkstemp(prefix="bg_", suffix=".gfa",
+                                       dir=os.path.dirname(cache))
+    os.close(tmp_fd)
+    with gzip.open(path, "rb") as src, open(tmp_path, "wb") as dst:
+        shutil.copyfileobj(src, dst, length=1 << 20)
+    os.replace(tmp_path, cache)
+    return cache, cache
+
+
 def run(gfa_path, fixture_name=None):
-    fixture = fixture_name or os.path.splitext(os.path.basename(gfa_path))[0]
+    fixture = fixture_name or os.path.splitext(os.path.basename(
+        gfa_path[:-3] if gfa_path.endswith(".gz") else gfa_path))[0]
     rec = stats_mod.Recorder(fixture)
 
+    resolved, _ = _resolve_gfa(gfa_path)
+
     with rec.phase("load"):
-        graph = Graph(graph_file=gfa_path)
+        graph = Graph(graph_file=resolved)
 
     with rec.phase("compact"):
         # Graph imports compact_graph but doesn't call it in __init__.
