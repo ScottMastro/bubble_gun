@@ -108,20 +108,27 @@ def load(gfa_path):
 
 
 def _build_csr(n, buckets):
-    indptr = np.zeros(n + 1, dtype=np.int32)
-    for i in range(n):
-        indptr[i + 1] = indptr[i] + len(buckets.get(i, ()))
-    m = int(indptr[-1])
-    nbr_idx = np.empty(m, dtype=np.int32)
-    nbr_side = np.empty(m, dtype=np.int8)
-    overlap = np.empty(m, dtype=np.int32)
+    # Flatten in idx order, then bulk-convert once. Avoids the
+    # per-element numpy assignment that dominates large-graph load.
+    flat_idx = []
+    flat_side = []
+    flat_ovl = []
+    sizes = [0] * n
+    fi_ext = flat_idx.extend
+    fs_ext = flat_side.extend
+    fo_ext = flat_ovl.extend
     for i in range(n):
         entries = buckets.get(i)
         if not entries:
             continue
-        off = indptr[i]
-        for j, (ni, ns, ov) in enumerate(entries):
-            nbr_idx[off + j] = ni
-            nbr_side[off + j] = ns
-            overlap[off + j] = ov
+        sizes[i] = len(entries)
+        fi_ext(e[0] for e in entries)
+        fs_ext(e[1] for e in entries)
+        fo_ext(e[2] for e in entries)
+    indptr = np.empty(n + 1, dtype=np.int32)
+    indptr[0] = 0
+    np.cumsum(sizes, out=indptr[1:], dtype=np.int32)
+    nbr_idx = np.asarray(flat_idx, dtype=np.int32)
+    nbr_side = np.asarray(flat_side, dtype=np.int8)
+    overlap = np.asarray(flat_ovl, dtype=np.int32)
     return indptr, nbr_idx, nbr_side, overlap
