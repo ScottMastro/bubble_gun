@@ -117,16 +117,26 @@ def find_bubbles(flat, parent_sets=None):
     ex = flat.end_nbr_idx.tolist()
     es = flat.end_nbr_side.tolist()
 
+    # Precompute side degrees as lists for the seed-prune check below.
+    start_deg = [si[i + 1] - si[i] for i in range(n)]
+    end_deg = [ei[i + 1] - ei[i] for i in range(n)]
+
+    # A bubble source needs ≥2 outgoing neighbors on the seed side —
+    # otherwise the BFS processes one child, hits len(S)==1 with an
+    # empty nodes_inside, and returns None. Skip those upfront.
+    #
+    # Last-write-wins on key collisions mirrors legacy find_bubbles
+    # (`graph.bubbles[bubble.key] = bubble`); the two pipelines emit
+    # the same final (source, sink) orientation per key.
     for idx in range(n):
-        for d in (0, 1):
-            res = _find_sb_from(idx, d, si, sx, ss, ei, ex, es, parent_sets)
-            if res is None:
-                continue
-            source, sink, _inside = res
-            key = (source, sink) if source < sink else (sink, source)
-            # Last-write-wins, mirroring the legacy find_bubbles behavior
-            # (`graph.bubbles[bubble.key] = bubble`). With matching seed
-            # iteration order, the final (source, sink) orientation per
-            # key matches legacy exactly.
-            bubbles[key] = res
+        if start_deg[idx] >= 2:
+            res = _find_sb_from(idx, 0, si, sx, ss, ei, ex, es, parent_sets)
+            if res is not None:
+                source, sink, _inside = res
+                bubbles[(source, sink) if source < sink else (sink, source)] = res
+        if end_deg[idx] >= 2:
+            res = _find_sb_from(idx, 1, si, sx, ss, ei, ex, es, parent_sets)
+            if res is not None:
+                source, sink, _inside = res
+                bubbles[(source, sink) if source < sink else (sink, source)] = res
     return bubbles
