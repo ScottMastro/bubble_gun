@@ -55,49 +55,36 @@ def load(gfa_path):
     n = len(g.seg_ids)
     g.seq_len = np.asarray(seq_lens, dtype=np.int32)
 
-    # Pass 2: for each L line emit the pair of half-edges. Collect per
-    # side as plain Python lists first, dedup via a set, then build CSR.
-    # start_buckets[idx] = list of (nbr_idx, nbr_side, overlap)
-    start_buckets = defaultdict(list)
-    end_buckets = defaultdict(list)
-    seen_start = defaultdict(set)
-    seen_end = defaultdict(set)
+    # Pass 2: for each L line emit the pair of half-edges. Buckets are
+    # sets so duplicate four-tuples are deduped naturally on add(),
+    # matching read_gfa's ``if not in`` check without the side helpers.
+    start_buckets = defaultdict(set)
+    end_buckets = defaultdict(set)
 
-    def add_start(a_idx, nbr_idx, nbr_side, ovl):
-        key = (nbr_idx, nbr_side, ovl)
-        if key in seen_start[a_idx]:
-            return
-        seen_start[a_idx].add(key)
-        start_buckets[a_idx].append(key)
-
-    def add_end(a_idx, nbr_idx, nbr_side, ovl):
-        key = (nbr_idx, nbr_side, ovl)
-        if key in seen_end[a_idx]:
-            return
-        seen_end[a_idx].add(key)
-        end_buckets[a_idx].append(key)
-
+    id_to_idx = g.id_to_idx
     for from_id, from_strand, to_id, to_strand, ovl in raw_edges:
-        a = g.id_to_idx.get(from_id)
-        b = g.id_to_idx.get(to_id)
-        if a is None or b is None:
-            continue  # dangling link; legacy just warns and skips
+        a = id_to_idx.get(from_id)
+        if a is None:
+            continue
+        b = id_to_idx.get(to_id)
+        if b is None:
+            continue
 
-        from_start = (from_strand == "-")
-        to_end = (to_strand == "-")
+        from_start = from_strand == "-"
+        to_end = to_strand == "-"
 
         if from_start and to_end:        # L x - y -
-            add_start(a, b, _SIDE_END, ovl)
-            add_end(b, a, _SIDE_START, ovl)
+            start_buckets[a].add((b, _SIDE_END, ovl))
+            end_buckets[b].add((a, _SIDE_START, ovl))
         elif from_start and not to_end:  # L x - y +
-            add_start(a, b, _SIDE_START, ovl)
-            add_start(b, a, _SIDE_START, ovl)
+            start_buckets[a].add((b, _SIDE_START, ovl))
+            start_buckets[b].add((a, _SIDE_START, ovl))
         elif (not from_start) and (not to_end):  # L x + y +
-            add_end(a, b, _SIDE_START, ovl)
-            add_start(b, a, _SIDE_END, ovl)
+            end_buckets[a].add((b, _SIDE_START, ovl))
+            start_buckets[b].add((a, _SIDE_END, ovl))
         else:                            # L x + y -
-            add_end(a, b, _SIDE_END, ovl)
-            add_end(b, a, _SIDE_END, ovl)
+            end_buckets[a].add((b, _SIDE_END, ovl))
+            end_buckets[b].add((a, _SIDE_END, ovl))
 
     g.start_indptr, g.start_nbr_idx, g.start_nbr_side, g.start_overlap = \
         _build_csr(n, start_buckets)

@@ -15,39 +15,49 @@ import numpy as np
 from harness.flat.graph import FlatGraph
 
 
-def _unique_nbr_on_side(flat, idx, side):
-    """If seg ``idx`` has exactly one neighbor on ``side`` and it's not a
-    self-loop, return ``(nbr_idx, nbr_side, overlap)``. Else ``None``."""
-    if side == 0:
-        if flat.start_degree(idx) != 1:
-            return None
-        nbr = next(flat.start_neighbors(idx))
-    else:
-        if flat.end_degree(idx) != 1:
-            return None
-        nbr = next(flat.end_neighbors(idx))
-    if nbr[0] == idx:
-        return None
-    return nbr
-
-
 def _compactable_map(flat):
     """Return a list ``c[idx][side] = (nbr_idx, nbr_side, overlap)`` or
     ``None`` for every (seg, side) that participates in a compactable
     (reciprocally degree-1) join."""
     n = len(flat)
+    si = flat.start_indptr.tolist()
+    sx = flat.start_nbr_idx.tolist()
+    ss = flat.start_nbr_side.tolist()
+    so = flat.start_overlap.tolist()
+    ei = flat.end_indptr.tolist()
+    ex = flat.end_nbr_idx.tolist()
+    es = flat.end_nbr_side.tolist()
+    eo = flat.end_overlap.tolist()
+
+    def unique(idx, side):
+        if side == 0:
+            lo = si[idx]
+            if si[idx + 1] - lo != 1:
+                return None
+            ni = sx[lo]
+            if ni == idx:
+                return None
+            return (ni, ss[lo], so[lo])
+        else:
+            lo = ei[idx]
+            if ei[idx + 1] - lo != 1:
+                return None
+            ni = ex[lo]
+            if ni == idx:
+                return None
+            return (ni, es[lo], eo[lo])
+
     c = [[None, None] for _ in range(n)]
     for idx in range(n):
         for side in (0, 1):
-            out = _unique_nbr_on_side(flat, idx, side)
+            out = unique(idx, side)
             if out is None:
                 continue
             nbr_idx, nbr_side, _ovl = out
-            back = _unique_nbr_on_side(flat, nbr_idx, nbr_side)
+            back = unique(nbr_idx, nbr_side)
             if back is None:
                 continue
-            b_idx, b_side, _b_ovl = back
-            if b_idx != idx or b_side != side:
+            if back[0] != idx or back[1] != side:
                 continue
             c[idx][side] = out
     return c
@@ -189,27 +199,40 @@ def compact(flat):
     start_buckets = [set() for _ in range(new_n)]
     end_buckets = [set() for _ in range(new_n)]
 
+    si = flat.start_indptr.tolist()
+    sx = flat.start_nbr_idx.tolist()
+    ss = flat.start_nbr_side.tolist()
+    so = flat.start_overlap.tolist()
+    ei = flat.end_indptr.tolist()
+    ex = flat.end_nbr_idx.tolist()
+    es = flat.end_nbr_side.tolist()
+    eo = flat.end_overlap.tolist()
+
     for (old_idx, old_side), (new_idx, new_side) in old_to_new.items():
-        nbrs = (flat.start_neighbors(old_idx) if old_side == 0
-                else flat.end_neighbors(old_idx))
-        for nbr_old_idx, nbr_old_side, ovl in nbrs:
-            # Skip compactable joins — they're consumed into the unitig.
-            c = compactable[old_idx][old_side]
-            if c is not None and c[0] == nbr_old_idx and c[1] == nbr_old_side:
-                continue
+        if old_side == 0:
+            lo, hi = si[old_idx], si[old_idx + 1]
+            nbr_idx_arr, nbr_side_arr, ovl_arr = sx, ss, so
+        else:
+            lo, hi = ei[old_idx], ei[old_idx + 1]
+            nbr_idx_arr, nbr_side_arr, ovl_arr = ex, es, eo
+
+        c = compactable[old_idx][old_side]
+        c_nbr_idx = c[0] if c is not None else -1
+        c_nbr_side = c[1] if c is not None else -1
+
+        target_bucket = start_buckets[new_idx] if new_side == 0 else end_buckets[new_idx]
+
+        for i in range(lo, hi):
+            nbr_old_idx = nbr_idx_arr[i]
+            nbr_old_side = nbr_side_arr[i]
+            if nbr_old_idx == c_nbr_idx and nbr_old_side == c_nbr_side:
+                continue  # consumed by unitig
             target = old_to_new.get((nbr_old_idx, nbr_old_side))
             if target is None:
-                # Would mean neighbor's side is interior to some unitig,
-                # which is impossible when the source side isn't compactable.
                 raise RuntimeError(
                     f"non-compactable edge points into unitig interior: "
                     f"{(old_idx, old_side)} -> {(nbr_old_idx, nbr_old_side)}")
-            nbr_new_idx, nbr_new_side = target
-            entry = (nbr_new_idx, int(nbr_new_side), int(ovl))
-            if new_side == 0:
-                start_buckets[new_idx].add(entry)
-            else:
-                end_buckets[new_idx].add(entry)
+            target_bucket.add((target[0], target[1], ovl_arr[i]))
 
     out = FlatGraph()
     out.seg_ids = new_seg_ids

@@ -16,17 +16,23 @@ def precompute_parent_sets(flat):
     idxs. Mirrors ``_precompute_parent_ids`` in the pangyplot-patched
     ``BubbleGun/find_bubbles.py``."""
     n = len(flat)
+    si = flat.start_indptr.tolist()
+    sx = flat.start_nbr_idx.tolist()
+    ei = flat.end_indptr.tolist()
+    ex = flat.end_nbr_idx.tolist()
     out = [None] * n
     for idx in range(n):
-        start_ids = frozenset(ni for ni, _, _ in flat.start_neighbors(idx))
-        end_ids = frozenset(ni for ni, _, _ in flat.end_neighbors(idx))
-        out[idx] = (start_ids, end_ids)
+        out[idx] = (frozenset(sx[si[idx]:si[idx + 1]]),
+                    frozenset(ex[ei[idx]:ei[idx + 1]]))
     return out
 
 
-def _find_sb_from(flat, parent_sets, s_idx, direction):
-    """Port of patched ``find_sb_alg``. Returns
-    ``(source_idx, sink_idx, tuple(inside_idxs))`` or ``None``."""
+def _find_sb_from(s_idx, direction,
+                  start_indptr, start_nbr_idx, start_nbr_side,
+                  end_indptr, end_nbr_idx, end_nbr_side,
+                  parent_sets):
+    """Port of patched ``find_sb_alg``. CSR arrays are passed in so the
+    hot loop indexes them directly without generator/tuple overhead."""
     seen = set()
     visited = set()
     nodes_inside = []
@@ -41,15 +47,23 @@ def _find_sb_from(flat, parent_sets, s_idx, direction):
         seen.discard((v_idx, v_dir))
 
         if v_dir == 0:
-            children = list(flat.start_neighbors(v_idx))
+            lo = start_indptr[v_idx]
+            hi = start_indptr[v_idx + 1]
+            nbr_idx_arr = start_nbr_idx
+            nbr_side_arr = start_nbr_side
         else:
-            children = list(flat.end_neighbors(v_idx))
+            lo = end_indptr[v_idx]
+            hi = end_indptr[v_idx + 1]
+            nbr_idx_arr = end_nbr_idx
+            nbr_side_arr = end_nbr_side
 
-        if not children:
+        if lo == hi:
             break
 
         aborted = False
-        for u_idx, u_side, _ovl in children:
+        for i in range(lo, hi):
+            u_idx = nbr_idx_arr[i]
+            u_side = nbr_side_arr[i]
             if u_side == 0:
                 u_child_direction = 1
                 u_parent_ids = parent_sets[u_idx][0]
@@ -92,9 +106,20 @@ def find_bubbles(flat, parent_sets=None):
         parent_sets = precompute_parent_sets(flat)
     bubbles = {}
     n = len(flat)
+
+    # Convert CSR arrays to Python lists once — indexing a Python list
+    # returns a Python int directly, avoiding per-edge numpy→int casts
+    # inside the BFS inner loop.
+    si = flat.start_indptr.tolist()
+    sx = flat.start_nbr_idx.tolist()
+    ss = flat.start_nbr_side.tolist()
+    ei = flat.end_indptr.tolist()
+    ex = flat.end_nbr_idx.tolist()
+    es = flat.end_nbr_side.tolist()
+
     for idx in range(n):
         for d in (0, 1):
-            res = _find_sb_from(flat, parent_sets, idx, d)
+            res = _find_sb_from(idx, d, si, sx, ss, ei, ex, es, parent_sets)
             if res is None:
                 continue
             source, sink, _inside = res
