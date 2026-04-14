@@ -20,3 +20,10 @@ main_test.py
 *so
 .pytest_cache/
 stats.jsonl
+
+# large fixtures and their decompressed caches (kept outside git)
+harness/fixtures/chrY*
+harness/fixtures/chr1*
+harness/fixtures/chr9*
+harness/fixtures/chrX*
+!harness/fixtures/chrY.README.md
