@@ -37,32 +37,52 @@ def _resolve_gfa(path):
     return cache, cache
 
 
-def run(gfa_path, fixture_name=None, measure_graph_size=False):
+def run(gfa_path, fixture_name=None, measure_graph_size=False,
+        representation="legacy"):
     fixture = fixture_name or os.path.splitext(os.path.basename(
         gfa_path[:-3] if gfa_path.endswith(".gz") else gfa_path))[0]
     rec = stats_mod.Recorder(fixture)
-    extras = {}
+    extras = {"representation": representation}
 
     resolved, _ = _resolve_gfa(gfa_path)
 
-    with rec.phase("load"):
-        graph = Graph(graph_file=resolved)
+    if representation == "legacy":
+        with rec.phase("load"):
+            graph = Graph(graph_file=resolved)
 
-    if measure_graph_size:
-        extras["graph_bytes_pre_compact"] = stats_mod.measure_graph_bytes(graph)
+        if measure_graph_size:
+            extras["graph_bytes_pre_compact"] = stats_mod.measure_graph_bytes(graph)
 
-    with rec.phase("compact"):
-        # Graph imports compact_graph but doesn't call it in __init__.
-        from BubbleGun.compact_graph import compact_graph
-        compact_graph(graph)
+        with rec.phase("compact"):
+            # Graph imports compact_graph but doesn't call it in __init__.
+            from BubbleGun.compact_graph import compact_graph
+            compact_graph(graph)
 
-    # Drop sequences — mirrors pangyplot's bubble_gun.shoot() to keep memory
-    # behavior comparable to production.
-    for node in graph.nodes.values():
-        node.seq = ""
+        # Drop sequences — mirrors pangyplot's bubble_gun.shoot() to keep
+        # memory behavior comparable to production.
+        for node in graph.nodes.values():
+            node.seq = ""
 
-    if measure_graph_size:
-        extras["graph_bytes_post_compact"] = stats_mod.measure_graph_bytes(graph)
+        if measure_graph_size:
+            extras["graph_bytes_post_compact"] = stats_mod.measure_graph_bytes(graph)
+    elif representation == "flat":
+        from harness.flat.load_gfa import load as flat_load
+        from harness.flat.compact import compact as flat_compact
+        from harness.flat.adapter import to_graph as flat_to_graph
+
+        with rec.phase("load"):
+            flat = flat_load(resolved)
+
+        with rec.phase("compact"):
+            flat = flat_compact(flat)
+
+        graph = flat_to_graph(flat)
+        del flat
+
+        if measure_graph_size:
+            extras["graph_bytes_post_compact"] = stats_mod.measure_graph_bytes(graph)
+    else:
+        raise ValueError(f"unknown representation: {representation!r}")
 
     with rec.phase("find_bubbles"):
         find_bubbles_mod.find_bubbles(graph)
@@ -85,9 +105,12 @@ def _main():
     p.add_argument("--fixture-name", help="override label used in stats")
     p.add_argument("--measure-graph-size", action="store_true",
                    help="walk graph.nodes to measure in-memory size (slow)")
+    p.add_argument("--representation", choices=["legacy", "flat"], default="legacy",
+                   help="front-half pipeline: legacy Node dict or flat numpy CSR")
     args = p.parse_args()
 
-    graph, rec, extras = run(args.gfa, args.fixture_name, args.measure_graph_size)
+    graph, rec, extras = run(args.gfa, args.fixture_name,
+                             args.measure_graph_size, args.representation)
 
     data = snapshot_mod.build(graph)
     bc = data["bubble_counts"]
