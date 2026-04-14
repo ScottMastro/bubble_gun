@@ -85,8 +85,76 @@ def build(graph):
     }
 
 
+def _bkey_from_idx(flat_graph, a_idx, b_idx):
+    return sorted([flat_graph.seg_ids[a_idx], flat_graph.seg_ids[b_idx]])
+
+
+def build_from_flat(flat_graph, find_result):
+    """Same JSON schema as ``build`` but reads from a flat ``FindResult``
+    (no BubbleGun.Node objects involved)."""
+    seg_ids = flat_graph.seg_ids
+
+    # Chain signatures: canonical set of (sorted string-key) tuples per chain.
+    # key_to_strkey turns a flat (idx, idx) bubble key into its (sorted)
+    # string-key tuple used by the snapshot.
+    key_to_strkey = {}
+    for k in find_result.bubbles:
+        a, b = k
+        key_to_strkey[k] = tuple(sorted([seg_ids[a], seg_ids[b]]))
+
+    chain_signatures = {}
+    for chain in find_result.chains:
+        sig = tuple(sorted(key_to_strkey[k] for k in chain.bubble_keys))
+        chain_signatures[chain.id] = sig
+
+    bubbles = []
+    for k, b in find_result.bubbles.items():
+        parent_str_key = (list(key_to_strkey[b.parent_key])
+                          if b.parent_key is not None else None)
+        chain_sig = chain_signatures.get(b.chain_id)
+        bubbles.append({
+            "key": list(key_to_strkey[k]),
+            "source": seg_ids[b.source],
+            "sink": seg_ids[b.sink],
+            "inside": sorted(seg_ids[i] for i in b.inside),
+            "type": b.btype,
+            "parent_key": parent_str_key,
+            "chain_signature_index": None,
+            "chain_sig": chain_sig,
+        })
+    bubbles.sort(key=lambda r: r["key"])
+
+    unique_sigs = sorted({r["chain_sig"] for r in bubbles if r["chain_sig"] is not None})
+    sig_to_index = {sig: i for i, sig in enumerate(unique_sigs)}
+    for r in bubbles:
+        r["chain_signature_index"] = sig_to_index.get(r["chain_sig"])
+        del r["chain_sig"]
+
+    chains = [{"index": i, "bubble_keys": [list(k) for k in sig]}
+              for i, sig in enumerate(unique_sigs)]
+
+    counts = {"simple": 0, "insertion": 0, "super": 0}
+    for b in bubbles:
+        counts[b["type"]] += 1
+
+    return {
+        "bubble_counts": counts,
+        "chain_count": len(chains),
+        "bubbles": bubbles,
+        "chains": chains,
+    }
+
+
 def dump(graph, path):
     data = build(graph)
+    with open(path, "w") as f:
+        json.dump(data, f, sort_keys=True, indent=2)
+        f.write("\n")
+    return data
+
+
+def dump_flat(flat_graph, find_result, path):
+    data = build_from_flat(flat_graph, find_result)
     with open(path, "w") as f:
         json.dump(data, f, sort_keys=True, indent=2)
         f.write("\n")
