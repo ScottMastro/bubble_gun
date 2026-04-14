@@ -94,44 +94,44 @@ def build_from_flat(flat_graph, find_result):
     (no BubbleGun.Node objects involved)."""
     seg_ids = flat_graph.seg_ids
 
-    # Chain signatures: canonical set of (sorted string-key) tuples per chain.
-    # key_to_strkey turns a flat (idx, idx) bubble key into its (sorted)
-    # string-key tuple used by the snapshot.
+    # String-key per bubble (sorted [src_id, sink_id]).
     key_to_strkey = {}
     for k in find_result.bubbles:
         a, b = k
-        key_to_strkey[k] = tuple(sorted([seg_ids[a], seg_ids[b]]))
+        sa, sb = seg_ids[a], seg_ids[b]
+        key_to_strkey[k] = (sa, sb) if sa < sb else (sb, sa)
 
-    chain_signatures = {}
-    for chain in find_result.chains:
-        sig = tuple(sorted(key_to_strkey[k] for k in chain.bubble_keys))
-        chain_signatures[chain.id] = sig
+    # Canonical signature per chain (used only for sorting, never for
+    # per-bubble hashing).
+    sig_by_chain_id = {
+        c.id: tuple(sorted(key_to_strkey[k] for k in c.bubble_keys))
+        for c in find_result.chains
+    }
+
+    # Deterministic chain index: sort chain ids by their signature. Per-
+    # bubble lookup below uses chain_id (int) so hashing is O(1).
+    ordered_chain_ids = sorted(sig_by_chain_id, key=sig_by_chain_id.get)
+    chain_id_to_index = {cid: i for i, cid in enumerate(ordered_chain_ids)}
 
     bubbles = []
+    bubbles_append = bubbles.append
     for k, b in find_result.bubbles.items():
         parent_str_key = (list(key_to_strkey[b.parent_key])
                           if b.parent_key is not None else None)
-        chain_sig = chain_signatures.get(b.chain_id)
-        bubbles.append({
+        bubbles_append({
             "key": list(key_to_strkey[k]),
             "source": seg_ids[b.source],
             "sink": seg_ids[b.sink],
             "inside": sorted(seg_ids[i] for i in b.inside),
             "type": b.btype,
             "parent_key": parent_str_key,
-            "chain_signature_index": None,
-            "chain_sig": chain_sig,
+            "chain_signature_index": chain_id_to_index.get(b.chain_id),
         })
     bubbles.sort(key=lambda r: r["key"])
 
-    unique_sigs = sorted({r["chain_sig"] for r in bubbles if r["chain_sig"] is not None})
-    sig_to_index = {sig: i for i, sig in enumerate(unique_sigs)}
-    for r in bubbles:
-        r["chain_signature_index"] = sig_to_index.get(r["chain_sig"])
-        del r["chain_sig"]
-
-    chains = [{"index": i, "bubble_keys": [list(k) for k in sig]}
-              for i, sig in enumerate(unique_sigs)]
+    chains = [{"index": i,
+               "bubble_keys": [list(k) for k in sig_by_chain_id[cid]]}
+              for i, cid in enumerate(ordered_chain_ids)]
 
     counts = {"simple": 0, "insertion": 0, "super": 0}
     for b in bubbles:
