@@ -8,6 +8,7 @@ Example:
 """
 import argparse
 import gzip
+import json
 import os
 import shutil
 import tempfile
@@ -39,6 +40,11 @@ def _resolve_gfa(path):
 
 def run(gfa_path, fixture_name=None, measure_graph_size=False,
         representation="legacy"):
+    """Run the pipeline and return ``(snapshot_dict, rec, extras)``.
+
+    ``snapshot_dict`` is the canonical JSON-ready dict from
+    ``harness.snapshot`` — same schema regardless of representation.
+    """
     fixture = fixture_name or os.path.splitext(os.path.basename(
         gfa_path[:-3] if gfa_path.endswith(".gz") else gfa_path))[0]
     rec = stats_mod.Recorder(fixture)
@@ -54,7 +60,6 @@ def run(gfa_path, fixture_name=None, measure_graph_size=False,
             extras["graph_bytes_pre_compact"] = stats_mod.measure_graph_bytes(graph)
 
         with rec.phase("compact"):
-            # Graph imports compact_graph but doesn't call it in __init__.
             from BubbleGun.compact_graph import compact_graph
             compact_graph(graph)
 
@@ -65,10 +70,23 @@ def run(gfa_path, fixture_name=None, measure_graph_size=False,
 
         if measure_graph_size:
             extras["graph_bytes_post_compact"] = stats_mod.measure_graph_bytes(graph)
+
+        with rec.phase("find_bubbles"):
+            find_bubbles_mod.find_bubbles(graph)
+        with rec.phase("connect_bubbles"):
+            connect_bubbles_mod.connect_bubbles(graph)
+        with rec.phase("find_parents"):
+            find_parents_mod.find_parents(graph)
+
+        data = snapshot_mod.build(graph)
+
     elif representation == "flat":
         from harness.flat.load_gfa import load as flat_load
         from harness.flat.compact import compact as flat_compact
-        from harness.flat.adapter import to_graph as flat_to_graph
+        from harness.flat.find_bubbles import find_bubbles as flat_find
+        from harness.flat.connect_bubbles import connect_bubbles as flat_connect
+        from harness.flat.find_parents import find_parents as flat_find_parents
+        from harness.flat.bubbles import FlatBubble, FindResult, classify
 
         with rec.phase("load"):
             flat = flat_load(resolved)
@@ -76,24 +94,35 @@ def run(gfa_path, fixture_name=None, measure_graph_size=False,
         with rec.phase("compact"):
             flat = flat_compact(flat)
 
-        graph = flat_to_graph(flat)
-        del flat
+        with rec.phase("find_bubbles"):
+            raw = flat_find(flat)
 
-        if measure_graph_size:
-            extras["graph_bytes_post_compact"] = stats_mod.measure_graph_bytes(graph)
+        with rec.phase("connect_bubbles"):
+            chains, chain_id_by_key = flat_connect(flat, raw)
+
+        with rec.phase("find_parents"):
+            btype_by_key = {k: classify(flat, src, snk, list(inside))
+                            for k, (src, snk, inside) in raw.items()}
+            parent_by_key = flat_find_parents(raw, btype_by_key)
+
+        bubbles = {}
+        for k, (src, snk, inside) in raw.items():
+            bubbles[k] = FlatBubble(
+                key=k,
+                source=src,
+                sink=snk,
+                inside=tuple(sorted(inside)),
+                btype=btype_by_key[k],
+                parent_key=parent_by_key.get(k),
+                chain_id=chain_id_by_key.get(k, 0),
+            )
+        find_result = FindResult(bubbles=bubbles, chains=chains)
+        data = snapshot_mod.build_from_flat(flat, find_result)
+
     else:
         raise ValueError(f"unknown representation: {representation!r}")
 
-    with rec.phase("find_bubbles"):
-        find_bubbles_mod.find_bubbles(graph)
-
-    with rec.phase("connect_bubbles"):
-        connect_bubbles_mod.connect_bubbles(graph)
-
-    with rec.phase("find_parents"):
-        find_parents_mod.find_parents(graph)
-
-    return graph, rec, extras
+    return data, rec, extras
 
 
 def _main():
@@ -104,20 +133,21 @@ def _main():
                    help="append timing/RSS entry to stats.jsonl")
     p.add_argument("--fixture-name", help="override label used in stats")
     p.add_argument("--measure-graph-size", action="store_true",
-                   help="walk graph.nodes to measure in-memory size (slow)")
+                   help="walk graph.nodes to measure in-memory size (legacy only)")
     p.add_argument("--representation", choices=["legacy", "flat"], default="legacy",
                    help="front-half pipeline: legacy Node dict or flat numpy CSR")
     args = p.parse_args()
 
-    graph, rec, extras = run(args.gfa, args.fixture_name,
-                             args.measure_graph_size, args.representation)
+    data, rec, extras = run(args.gfa, args.fixture_name,
+                            args.measure_graph_size, args.representation)
 
-    data = snapshot_mod.build(graph)
     bc = data["bubble_counts"]
     cc = data["chain_count"]
 
     if args.snapshot:
-        snapshot_mod.dump(graph, args.snapshot)
+        with open(args.snapshot, "w") as f:
+            json.dump(data, f, sort_keys=True, indent=2)
+            f.write("\n")
         print(f"wrote snapshot → {args.snapshot}")
 
     if args.record_stats:

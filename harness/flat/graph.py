@@ -2,7 +2,7 @@
 
 Replaces the ``{id: BubbleGun.Node}`` dict-of-objects model with contiguous
 integer-indexed arrays. Each segment has a small internal idx (0..n-1);
-string ids from the GFA are kept on the side for the adapter.
+string ids from the GFA are kept on the side for snapshot output.
 
 Adjacency is stored as two CSR-style structures (start side / end side),
 each composed of three parallel 1D arrays:

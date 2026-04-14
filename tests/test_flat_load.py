@@ -1,8 +1,7 @@
 """Parity checks for FlatGraph loader vs BubbleGun.graph_io.read_gfa.
 
-Phase 1 commit 1: only loading — no compaction, no adapter, no
-find_bubbles. If load degree distributions match, we can layer
-compaction on top with confidence.
+Load-only parity — no compaction, no bubble finding. If load degree
+distributions match, anything built on top has a correct foundation.
 """
 import os
 

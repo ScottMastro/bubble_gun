@@ -5,7 +5,6 @@ import os
 import pytest
 
 from harness.run import run
-from harness.snapshot import build
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "..", "harness", "fixtures", "DRB1-3123.gfa")
 GOLDEN = os.path.join(os.path.dirname(__file__), "..", "harness", "goldens", "DRB1-3123.bubbles.json")
@@ -19,8 +18,7 @@ def _canonical_text(data):
                     reason="baseline snapshot missing; regenerate with "
                            "`python -m harness.run --gfa <fixture> --snapshot <path>`")
 def test_drb1_matches_golden():
-    graph, _, _ = run(FIXTURE, fixture_name="DRB1-3123")
-    current = build(graph)
+    current, _, _ = run(FIXTURE, fixture_name="DRB1-3123")
 
     with open(GOLDEN) as f:
         golden = json.load(f)

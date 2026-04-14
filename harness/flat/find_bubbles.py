@@ -99,6 +99,9 @@ def find_bubbles(flat, parent_sets=None):
                 continue
             source, sink, _inside = res
             key = (source, sink) if source < sink else (sink, source)
-            if key not in bubbles:
-                bubbles[key] = res
+            # Last-write-wins, mirroring the legacy find_bubbles behavior
+            # (`graph.bubbles[bubble.key] = bubble`). With matching seed
+            # iteration order, the final (source, sink) orientation per
+            # key matches legacy exactly.
+            bubbles[key] = res
     return bubbles

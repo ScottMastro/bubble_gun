@@ -10,7 +10,6 @@ import os
 import pytest
 
 from harness.run import run
-from harness.snapshot import build
 
 FIXTURE = os.path.join(os.path.dirname(__file__), "..", "harness", "fixtures", "chrY.gfa.gz")
 
@@ -25,8 +24,7 @@ pytestmark = [
 def chry_snapshots():
     out = {}
     for rep in ("legacy", "flat"):
-        graph, rec, extras = run(FIXTURE, fixture_name="chrY", representation=rep)
-        data = build(graph)
+        data, rec, extras = run(FIXTURE, fixture_name="chrY", representation=rep)
         rec.record(data["bubble_counts"], data["chain_count"], extras=extras)
         out[rep] = data
     return out
