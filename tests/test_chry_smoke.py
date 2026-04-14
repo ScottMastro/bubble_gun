@@ -1,9 +1,9 @@
 """chrY perf canary — only runs if the fixture is locally available.
 
-chrY is a scale test, not a golden test. We record runtime/RSS to
-stats.jsonl but don't assert on specific bubble counts (those can
-legitimately shift as we swap the data model — the DRB1 golden
-guards correctness).
+chrY is a scale test. We record runtime/RSS to stats.jsonl under both
+representations and assert that the bubble snapshots match between
+them — so any topology drift on a larger fixture fails loudly, even
+without a committed chrY golden.
 """
 import os
 
@@ -21,13 +21,24 @@ pytestmark = [
 ]
 
 
-def test_chry_completes():
-    graph, rec, extras = run(FIXTURE, fixture_name="chrY")
-    data = build(graph)
-    bc = data["bubble_counts"]
-    entry = rec.record(bc, data["chain_count"], extras=extras)
+@pytest.fixture(scope="module")
+def chry_snapshots():
+    out = {}
+    for rep in ("legacy", "flat"):
+        graph, rec, extras = run(FIXTURE, fixture_name="chrY", representation=rep)
+        data = build(graph)
+        rec.record(data["bubble_counts"], data["chain_count"], extras=extras)
+        out[rep] = data
+    return out
 
-    # No strict assertions on counts — record them so we can eyeball stats.jsonl.
+
+@pytest.mark.parametrize("rep", ["legacy", "flat"])
+def test_chry_nontrivial(chry_snapshots, rep):
+    bc = chry_snapshots[rep]["bubble_counts"]
     assert bc["simple"] + bc["super"] + bc["insertion"] > 1000, \
-        f"chrY produced suspiciously few bubbles: {bc}"
-    assert entry["total_s"] > 0
+        f"chrY ({rep}) produced suspiciously few bubbles: {bc}"
+
+
+def test_chry_flat_matches_legacy(chry_snapshots):
+    assert chry_snapshots["legacy"] == chry_snapshots["flat"], \
+        "chrY bubble snapshots diverge between legacy and flat"
