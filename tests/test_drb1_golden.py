@@ -19,7 +19,7 @@ def _canonical_text(data):
                     reason="baseline snapshot missing; regenerate with "
                            "`python -m harness.run --gfa <fixture> --snapshot <path>`")
 def test_drb1_matches_golden():
-    graph, _ = run(FIXTURE, fixture_name="DRB1-3123")
+    graph, _, _ = run(FIXTURE, fixture_name="DRB1-3123")
     current = build(graph)
 
     with open(GOLDEN) as f:

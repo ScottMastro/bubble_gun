@@ -37,15 +37,19 @@ def _resolve_gfa(path):
     return cache, cache
 
 
-def run(gfa_path, fixture_name=None):
+def run(gfa_path, fixture_name=None, measure_graph_size=False):
     fixture = fixture_name or os.path.splitext(os.path.basename(
         gfa_path[:-3] if gfa_path.endswith(".gz") else gfa_path))[0]
     rec = stats_mod.Recorder(fixture)
+    extras = {}
 
     resolved, _ = _resolve_gfa(gfa_path)
 
     with rec.phase("load"):
         graph = Graph(graph_file=resolved)
+
+    if measure_graph_size:
+        extras["graph_bytes_pre_compact"] = stats_mod.measure_graph_bytes(graph)
 
     with rec.phase("compact"):
         # Graph imports compact_graph but doesn't call it in __init__.
@@ -57,6 +61,9 @@ def run(gfa_path, fixture_name=None):
     for node in graph.nodes.values():
         node.seq = ""
 
+    if measure_graph_size:
+        extras["graph_bytes_post_compact"] = stats_mod.measure_graph_bytes(graph)
+
     with rec.phase("find_bubbles"):
         find_bubbles_mod.find_bubbles(graph)
 
@@ -66,7 +73,7 @@ def run(gfa_path, fixture_name=None):
     with rec.phase("find_parents"):
         find_parents_mod.find_parents(graph)
 
-    return graph, rec
+    return graph, rec, extras
 
 
 def _main():
@@ -76,9 +83,11 @@ def _main():
     p.add_argument("--record-stats", action="store_true",
                    help="append timing/RSS entry to stats.jsonl")
     p.add_argument("--fixture-name", help="override label used in stats")
+    p.add_argument("--measure-graph-size", action="store_true",
+                   help="walk graph.nodes to measure in-memory size (slow)")
     args = p.parse_args()
 
-    graph, rec = run(args.gfa, args.fixture_name)
+    graph, rec, extras = run(args.gfa, args.fixture_name, args.measure_graph_size)
 
     data = snapshot_mod.build(graph)
     bc = data["bubble_counts"]
@@ -89,10 +98,13 @@ def _main():
         print(f"wrote snapshot → {args.snapshot}")
 
     if args.record_stats:
-        entry = rec.record(bc, cc)
+        entry = rec.record(bc, cc, extras=extras)
         print(f"recorded: total={entry['total_s']}s rss={entry['peak_rss_mb']}MB "
               f"simple={bc['simple']} super={bc['super']} insertion={bc['insertion']} "
               f"chains={cc}")
+        if extras.get("graph_bytes_pre_compact"):
+            print(f"graph bytes: pre={extras['graph_bytes_pre_compact']/1e6:.1f}MB "
+                  f"post={extras['graph_bytes_post_compact']/1e6:.1f}MB")
     else:
         print(f"total={round(sum(rec.phase_times.values()), 3)}s "
               f"simple={bc['simple']} super={bc['super']} insertion={bc['insertion']} "

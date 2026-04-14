@@ -22,10 +22,10 @@ pytestmark = [
 
 
 def test_chry_completes():
-    graph, rec = run(FIXTURE, fixture_name="chrY")
+    graph, rec, extras = run(FIXTURE, fixture_name="chrY")
     data = build(graph)
     bc = data["bubble_counts"]
-    entry = rec.record(bc, data["chain_count"])
+    entry = rec.record(bc, data["chain_count"], extras=extras)
 
     # No strict assertions on counts — record them so we can eyeball stats.jsonl.
     assert bc["simple"] + bc["super"] + bc["insertion"] > 1000, \

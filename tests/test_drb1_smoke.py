@@ -10,7 +10,7 @@ FIXTURE = os.path.join(os.path.dirname(__file__), "..", "harness", "fixtures", "
 
 @pytest.fixture(scope="module")
 def drb1_graph():
-    graph, _ = run(FIXTURE, fixture_name="DRB1-3123")
+    graph, _, _ = run(FIXTURE, fixture_name="DRB1-3123")
     return graph
 
 
